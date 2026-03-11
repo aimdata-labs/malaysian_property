@@ -1,0 +1,176 @@
+---
+title: "Malaysian Property"
+subtitle: "Part two: Words"
+author: "Sean Ng"
+organization: "AIMdata"
+date-modified: "11 January 2026"
+execute: 
+  echo: false
+---
+
+
+```{r setup, include = FALSE}
+
+knitr::opts_chunk$set(echo = FALSE, 
+                      warning = FALSE, 
+                      message = FALSE, 
+                      fig.width = 9)
+
+
+library(tidyverse)
+library(here)
+library(janitor)
+library(scales)
+library(tidytext)
+library(widyr)
+library(ggraph)
+library(patchwork)
+library(kableExtra)
+library(viridis)
+library(stringr)
+
+`%out%` <- Negate(`%in%`)
+options(scipen = 100)
+theme_set(theme_light())
+range_wna <- function(x){(x-min(x, na.rm = TRUE))/(max(x, na.rm = TRUE)-min(x, na.rm = TRUE))}
+
+Mode <- function(x) {
+  ux <- unique(x)
+  ux[which.max(tabulate(match(x, ux)))]
+}
+
+last_comma <- function(x, sep = ","){
+  x <- sapply(strsplit(x, sep),"[")
+  trimws(x[[length(x)]])
+}
+```
+
+```{r data}
+houses <- read_csv("./data/houses.csv") |> 
+  janitor::clean_names()|>
+  mutate(
+    size_sqft = str_remove_all(property_size, "sq.ft."),
+    price = str_remove_all(price, "RM"),
+    price = gsub("[^0-9.-]", "", price), 
+    price = as.numeric(price), 
+    developer = str_remove_all(developer, "Sdn. Bhd.|Sdn Bhd")
+  ) |> 
+  filter(address != "-")
+
+postcodes <- read_csv("./data/postcodes.csv")
+```
+
+Nearby amenities according to Mudah.my are within 1km of the property
+
+```{r}
+
+states <- c("Johor", "Kedah", "Kelantan", "Malacca", "Negeri Sembilan", 
+            "Pahang", "Penang", "Perak", "Perlis", "Sabah", "Sarawak", 
+            "Selangor", "Terengganu", "Kuala Lumpur", "Putrajaya", "Labuan") 
+
+mutate(postcode = str_extract(address, "\\d{5}"))  
+
+houses  |> glimpse()
+houses |> 
+  select(address) |> 
+  mutate(state = 
+           case_when(str_detect(address, "Johor") ~ "Johor", 
+                     str_detect(address, "Kedah") ~ "Kedah", 
+                     str_detect(address, "Kelantan") ~ "Kelantan", 
+                     str_detect(address, "Malacca|Melaka") ~ "Malacca", 
+                     str_detect(address, "Negeri Sembilan") ~ "Negeri Sembilan",
+                     str_detect(address, "Pahang") ~ "Pahang", 
+                     str_detect(address, "Penang") ~ "Penang", 
+                     str_detect(address, "Perak") & 
+                       !str_detect(address, "Jalan Perak") ~ "Perak", 
+                     str_detect(address, "Perlis") ~ "Perlis", 
+                     str_detect(address, "Sabah") ~ "Sabah", 
+                     str_detect(address, "Sarawak") ~ "Sarawak", 
+                     str_detect(address, "Selangor") ~ "Selangor", 
+                     str_detect(address, "Terengganu") ~ "Terengganu", 
+                     str_detect(address, "Kuala Lumpur|KL") ~ "Kuala Lumpur", 
+                     str_detect(address, "Putrajaya") ~ "Putrajaya", 
+                     str_detect(address, "Labuan") ~ "Labuan", 
+                     TRUE ~ NA_character_)) |> 
+  filter(
+    state %in% c("Johor", "Penang", "Kuala Lumpur", "Selangor")
+  ) |> 
+  mutate(address = str_remove_all(address, paste0(", ", state)), 
+         address = str_replace_all(address, "\\,,", "\\,")) |> 
+  mutate(neighbourhood = str_extract(address, "\\b[^,]+$")) |> 
+  mutate(neighbourhood = 
+           case_when(
+             str_detect(neighbourhood, "81110 KANGKAR PULAI") ~ 
+               "Kangkar Pulai", 
+             str_detect(neighbourhood, "81750 Masai Bahru|Masai Bahru") ~ 
+               "Masai", 
+             str_detect(neighbourhood, "Austin Heights|Austin Perdana|Jalan Dato' Onn Utama Bahru|Jalan Daya Bahru|Jalan Kangkar Tebrau Bahru|Mount Austin Bahru|Taman Daya Bahru|Mount Austin|Austin Bahru") ~ 
+               "Austin Heights", 
+             str_detect(neighbourhood, "Yahya Awal") ~ 
+               "Yahya Awal", 
+             str_detect(neighbourhood, "Jalan Datin Halimah Bahru|Jalan Datuk Abdullah Tahir Bahru|	Jalan Mahmoodiah Bahru|	Jalan Pelita Bahru|Jalan Stulang Laut Bahru|Jalan Tun Abdul Razak Bahru|Johor Bahru Bahru|Malaysia Bahru|Off Bukit Chagar Bahru|Tanjung Puteri Bahru|Jalan Abdul Rahman Andak Bahru|Mahmoodiah|Jalan Mariamah Bahru|Jalan Pelita Bahru") ~ 
+               "JB Sentral", 
+             str_detect(neighbourhood, "Jalan Hang Hebat Bahru|Jalan Persisiran Perling Bahru|Jalan Skudai Bahru|Taman Bukit Mewah Bahru|Taman Kempas Utama Bahru|skudai") ~ 
+               "Skudai", 
+             str_detect(neighbourhood, "Tampoi|Tampo") ~ "Tampoi"
+             str_detect(neighbourhood, "Jalan Idaman Utama Bahru|Jalan Kebun Teh 1 Bahru|Jalan Larkin Perdana 2 Bahru|Larkin Bahru|Larkin Idaman|LARKIN RESIDENCE 2 Bahru|Off Jalan Dato Jaafar Bahru|80350 Johor Bahru") ~ 
+               "Larkin", 
+             str_detect(neighbourhood, "Jalan Medini Utara 3 Bahru|Jalan Undan 8 Bahru") ~ 
+               "Iskandar Puteri", 
+             str_detect(neighbourhood, "Jalan Permas 2 Bahru|Persiaran Bumi Hijau Bahru|Plentong Bahru|Taman Bayu Puteri Bahru|Permas Jaya") ~ 
+               "Permas Jaya", 
+             str_detect(neighbourhood, "Jalan Persiaran Tanjung Bahru|Jalan Tampoi Bahru|Off Jalan Persiaran Tanjung Bahru|Taman Desa Tebrau Bahru|Taman Nusa Bestari Jaya Bahru|Taman Seri Setanggi Bahru") ~ 
+               "Tebrau", 
+             str_detect(neighbourhood, "Kg. Sungai Danga Bahru|Jalan Skudai Off Country Garden Danga Bay Bahru|Taman D' Utama Baru Bahru|Taman Laguna Bahru Bahru") ~ 
+               "Danga Bay", 
+             str_detect(neighbourhood, "Perling") ~ 
+               "Perling", 
+             str_detect(neighbourhood, "Taman Molek") ~ 
+               "Taman Molek", 
+             str_detect(neighbourhood, "Taman Tan Sri Yacob Bahru|Bandar Selesa Jaya Bahru|Bandar Uda Utama Bahru") ~ 
+               "Bukit Indah", 
+             neighbourhood == "Bahru" ~ "JB Sentral", 
+             str_detect(neighbourhood, "Bandar Menjalara") ~ "Desa ParkCity", 
+             str_detect(neighbourhood, "Ampang|Desa Pandan|Pandan Indah") ~ "Ampang", 
+             str_detect(neighbourhood, "Bangsar|Mid Valley City") ~ "Bangsar", 
+             str_detect(neighbourhood, "City Centre|Jalan Sultan Ismail|KL City|Bukit Bintang") ~ "KLCC", 
+             str_detect(neighbourhood, "Jalan Ipoh|Jalan Kuching") ~ "Sentul", 
+             str_detect(neighbourhood, "Pantai") ~ "Taman Desa", 
+             # Only one property from Damansara Heights
+             str_detect(neighbourhood, "Solaris Dutamas|Sri Hartamas|Damansara Heights") ~ "Mont Kiara",
+             str_detect(neighbourhood, "Sri Damansara|Bandar Sri Damansara") ~ "Kepong", 
+             str_detect(neighbourhood, "Taman Melawati") ~ "Wangsa Maju", 
+             str_detect(neighbourhood, "Paya Terubong") ~ "Ayer Hitam", 
+             str_detect(neighbourhood, "Bukit Dumbar") ~ "Jelutong", 
+             str_detect(neighbourhood, "Seberang Jaya") ~ "Butterworth", 
+             str_detect(neighbourhood, "Sungai Nibong") ~ "Sungai Dua", 
+             str_detect(neighbourhood, "Balakong|Cheras|Bandar Sungai Long") ~ "Cheras",
+             str_detect(neighbourhood, "Bukit Bandar Jaya") ~ "Setia Alam",
+             str_detect(neighbourhood, "Bandar Kinrara|Putra Heights") ~ "Puchong", 
+             str_detect(neighbourhood, "Bandar Sunway|USJ") ~ "Subang Jaya",
+             str_detect(neighbourhood, "Damansara Damai|Subang Bestari") ~ "Sungai Buloh", 
+             str_detect(neighbourhood, "Shah Alam") ~ "I-City", 
+             str_detect(neighbourhood, "Pandamaran") ~ "Port Klang", 
+             str_detect(neighbourhood, "SS2") ~ "Petaling Jaya", 
+             str_detect(neighbourhood, "Salak Tinggi") ~ "Sepang", 
+             TRUE ~ neighbourhood
+           )) |> 
+  count(state, neighbourhood)
+
+
+  separate_wider_delim(address, delim = ",", 
+                       names = c("a", "b", "c", "d", "e", "f", "g", "h"), 
+                       too_few = "align_start") |> 
+  count(c, sort = TRUE)
+  mutate(state = last_comma(address))
+  
+houses |> filter(address == "-")
+
+  city = case_when(
+           str_detect(city, "Johor Bahru|JOHOR Bahru|Permas Jaya") ~ "Johor Bahru", 
+           str_detect(city, "KL City|KLCC") ~ "Kuala Lumpur", 
+           TRUE ~ city
+         ))
+```
+
+
